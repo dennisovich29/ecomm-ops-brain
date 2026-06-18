@@ -1,0 +1,25 @@
+# Backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/dist/
+backend/*.egg-info/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.pnpm-store/
+
+# Docker
+.dockerignore
+
+# General
+.env
+.env.local
+.DS_Store
+*.log

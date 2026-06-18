@@ -1,0 +1,220 @@
+{
+  "intent_cases": [
+    {
+      "id": "intent_diagnostic_sales_drop",
+      "description": "Classic diagnostic query should route to DIAGNOSTIC with sales+inventory+marketing+support",
+      "input": "Why did sales drop yesterday?",
+      "expected_query_type": "DIAGNOSTIC",
+      "expected_domains": ["sales", "inventory", "marketing", "support"],
+      "expected_output": "DIAGNOSTIC query about sales performance, routing to sales, inventory, marketing, and support domains"
+    },
+    {
+      "id": "intent_action_fix_stockout",
+      "description": "Action query should route to ACTION with inventory domain",
+      "input": "Fix the stockout problem and restock SKU-001.",
+      "expected_query_type": "ACTION",
+      "expected_domains": ["inventory"],
+      "expected_output": "ACTION query targeting inventory domain, entities include SKU-001"
+    },
+    {
+      "id": "intent_memory_past_incidents",
+      "description": "Memory query should route to MEMORY",
+      "input": "What did we do last time sales dropped like this?",
+      "expected_query_type": "MEMORY",
+      "expected_domains": [],
+      "expected_output": "MEMORY query to retrieve past incidents with similar sales drop pattern"
+    },
+    {
+      "id": "intent_hybrid_analyze_and_fix",
+      "description": "Hybrid query should route to HYBRID with inventory domain",
+      "input": "Analyze the inventory issue and fix it.",
+      "expected_query_type": "HYBRID",
+      "expected_domains": ["inventory"],
+      "expected_output": "HYBRID query combining diagnostic analysis and action execution for inventory domain"
+    },
+    {
+      "id": "intent_summary_report",
+      "description": "Summary query should route to SUMMARY",
+      "input": "Give me a summary of yesterday's performance.",
+      "expected_query_type": "SUMMARY",
+      "expected_domains": ["sales", "inventory", "marketing", "support"],
+      "expected_output": "SUMMARY query for overall performance report across all domains for yesterday"
+    }
+  ],
+  "synthesis_cases": [
+    {
+      "id": "synthesis_full_findings",
+      "description": "RCA with all four agent findings — should identify stockout + campaign pause as root cause",
+      "input": "Why did sales drop yesterday?",
+      "agent_findings": {
+        "sales": {
+          "revenue_summary": {
+            "date": "yesterday",
+            "revenue": 31525.00,
+            "vs_baseline_pct": -35.0,
+            "orders": 230,
+            "avg_order_value": 137.07
+          },
+          "anomaly_result": {
+            "is_anomaly": true,
+            "z_score": -2.8,
+            "severity": "high",
+            "description": "Revenue 35% below 30-day average"
+          },
+          "top_affected_products": [
+            {"product_id": "SKU-001", "name": "Wireless Headphones Pro", "revenue_drop_pct": -92},
+            {"product_id": "SKU-002", "name": "Running Shoes X2", "revenue_drop_pct": -89},
+            {"product_id": "SKU-003", "name": "Yoga Mat Premium", "revenue_drop_pct": -85}
+          ]
+        },
+        "inventory": {
+          "stockout_events": [
+            {"product_id": "SKU-001", "product_name": "Wireless Headphones Pro", "estimated_lost_revenue": 5200.00},
+            {"product_id": "SKU-002", "product_name": "Running Shoes X2", "estimated_lost_revenue": 5200.00},
+            {"product_id": "SKU-003", "product_name": "Yoga Mat Premium", "estimated_lost_revenue": 5200.00}
+          ],
+          "out_of_stock_count": 3,
+          "total_estimated_lost_revenue": 15600.00
+        },
+        "marketing": {
+          "campaign_issues": [
+            {
+              "campaign_id": "CAMP-001",
+              "name": "Google Shopping — Electronics",
+              "status": "paused",
+              "spend": 0,
+              "roas": 0.0,
+              "vs_prior_period_pct": -100.0
+            }
+          ],
+          "missed_promotions": [
+            {"promo_id": "PROMO-001", "name": "Summer Sale — 15% off Fitness", "status": "missed"}
+          ]
+        },
+        "support": {
+          "ticket_volume": {
+            "total_tickets": 110,
+            "vs_7day_avg_pct": 129.2,
+            "is_spike": true
+          },
+          "top_complaint_themes": [
+            {"theme": "Out of stock / can't purchase", "ticket_count": 62, "pct_of_total": 55.4, "severity": "high"},
+            {"theme": "Order delays", "ticket_count": 23, "pct_of_total": 20.9}
+          ],
+          "refund_rate": {"refund_rate_pct": 6.2, "vs_baseline_pct": 195.0}
+        }
+      },
+      "confidence_score": 0.9,
+      "context": [
+        "Sales revenue dropped 35% to $31,525 with 230 orders (vs baseline 320).",
+        "SKU-001 Wireless Headphones Pro was out of stock all day, estimated $5,200 lost revenue.",
+        "SKU-002 Running Shoes X2 was out of stock all day, estimated $5,200 lost revenue.",
+        "SKU-003 Yoga Mat Premium was out of stock all day, estimated $5,200 lost revenue.",
+        "CAMP-001 Google Shopping — Electronics campaign was paused, $0 spend, -100% vs prior period.",
+        "Support tickets spiked 129% to 110 tickets; top complaint theme was 'Out of stock / can't purchase' at 55.4%.",
+        "Refund rate 6.2%, up 195% vs baseline."
+      ],
+      "expected_keywords": ["stockout", "out of stock", "SKU-001", "campaign", "Google Shopping", "paused"],
+      "should_not_contain": ["SKU-004 fully stocked", "campaign performed well", "no issues found"]
+    },
+    {
+      "id": "synthesis_partial_findings_sales_only",
+      "description": "RCA with only sales data — should note incomplete analysis and limited confidence",
+      "input": "Why did revenue fall?",
+      "agent_findings": {
+        "sales": {
+          "revenue_summary": {"revenue": 31525.00, "vs_baseline_pct": -35.0, "orders": 230},
+          "anomaly_result": {"is_anomaly": true, "z_score": -2.8, "severity": "high"}
+        },
+        "inventory": null,
+        "marketing": null,
+        "support": null
+      },
+      "confidence_score": 0.4,
+      "context": [
+        "Sales revenue dropped 35% to $31,525.",
+        "Anomaly detected: z_score -2.8, high severity.",
+        "No inventory, marketing, or support data available."
+      ],
+      "expected_keywords": ["revenue", "drop", "anomaly"],
+      "should_not_contain": ["stockout confirmed", "campaign was paused", "support tickets spiked"]
+    },
+    {
+      "id": "synthesis_with_memory_context",
+      "description": "RCA with all findings + past incident context — should reference historical precedent",
+      "input": "Why did sales drop yesterday? Has this happened before?",
+      "agent_findings": {
+        "sales": {
+          "revenue_summary": {"revenue": 31525.00, "vs_baseline_pct": -35.0, "orders": 230},
+          "anomaly_result": {"is_anomaly": true, "z_score": -2.8, "severity": "high"}
+        },
+        "inventory": {
+          "stockout_events": [{"product_id": "SKU-001", "product_name": "Wireless Headphones Pro", "estimated_lost_revenue": 5200}],
+          "out_of_stock_count": 1
+        },
+        "marketing": null,
+        "support": null
+      },
+      "similar_incidents": [
+        {
+          "incident_date": "2025-11-15",
+          "root_cause": "SKU-001 stockout during Black Friday prep — restock resolved in 48h",
+          "actions_taken": ["restock_product SKU-001 (500 units)"],
+          "outcome": "Revenue recovered to baseline within 2 days"
+        }
+      ],
+      "confidence_score": 0.65,
+      "context": [
+        "Sales revenue dropped 35% to $31,525.",
+        "SKU-001 Wireless Headphones Pro was out of stock.",
+        "Past incident on 2025-11-15: same SKU-001 stockout, resolved by restocking 500 units in 48 hours."
+      ],
+      "expected_keywords": ["SKU-001", "stockout", "past", "incident", "restock"],
+      "should_not_contain": ["no prior incidents", "first time this happened"]
+    }
+  ],
+  "action_cases": [
+    {
+      "id": "action_proposal_stockout_three_skus",
+      "description": "State with 3 stockout SKUs should produce restock actions for each",
+      "input": "Fix the inventory problem.",
+      "stockout_skus": ["SKU-001", "SKU-002", "SKU-003"],
+      "stockout_names": ["Wireless Headphones Pro", "Running Shoes X2", "Yoga Mat Premium"],
+      "campaign_issues": [{"campaign_id": "CAMP-001", "name": "Google Shopping — Electronics", "status": "paused"}],
+      "expected_action_types": ["restock_product", "resume_campaign"],
+      "expected_output": "Propose restock_product actions for SKU-001, SKU-002, SKU-003 and resume_campaign for CAMP-001 with justifications referencing the stockout data."
+    },
+    {
+      "id": "action_proposal_campaign_only",
+      "description": "State with only paused campaign (no stockout) should propose resume_campaign",
+      "input": "Our marketing is underperforming, take action.",
+      "stockout_skus": [],
+      "campaign_issues": [{"campaign_id": "CAMP-001", "name": "Google Shopping — Electronics", "status": "paused", "roas": 0}],
+      "expected_action_types": ["resume_campaign"],
+      "expected_output": "Propose resume_campaign for CAMP-001 Google Shopping with justification referencing zero ROAS and paused status."
+    }
+  ],
+  "graph_cases": [
+    {
+      "id": "graph_diagnostic_full",
+      "description": "End-to-end diagnostic query should return structured root cause analysis",
+      "input": "Why did sales drop yesterday?",
+      "expected_response_type": "diagnostic",
+      "expected_output": "Root cause analysis identifying stockout of top SKUs and paused Google Shopping campaign as primary drivers of the 35% revenue drop, with supporting evidence from inventory and support ticket data.",
+      "context": [
+        "Sales dropped 35% to $31,525 yesterday.",
+        "SKU-001, SKU-002, SKU-003 were all out of stock.",
+        "Google Shopping campaign CAMP-001 was paused.",
+        "Support tickets spiked 129% with top theme being out-of-stock complaints."
+      ]
+    },
+    {
+      "id": "graph_memory_query",
+      "description": "Memory query should return recall of past incidents, not a new analysis",
+      "input": "What did we do last time this happened?",
+      "expected_response_type": "memory_recall",
+      "expected_output": "Recall of past incidents similar to current situation, with actions taken and outcomes described.",
+      "context": []
+    }
+  ]
+}

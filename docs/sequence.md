@@ -18,7 +18,7 @@ sequenceDiagram
     API->>LG: astream(OpsState, stream_mode=[values,messages])
 
     LG->>AZ: classify intent (GPT-4o structured output)
-    AZ-->>LG: {query_type, domains, time_range, action_requested}
+    AZ-->>LG: {query_type, domains, time_range, entities, action_requested}
 
     par parallel dispatch
         LG->>PG: Sales Agent — SQL queries

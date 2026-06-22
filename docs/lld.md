@@ -4,7 +4,13 @@
 
 ```
 ecomm-ops-brain/
+├── docker-compose.yml                # Production compose
+├── docker-compose.dev.yml            # Dev overlay (hot reload, volume mount)
+├── .env.example                      # Environment variable template
 ├── backend/
+│   ├── Dockerfile                    # Multi-stage: builder (uv) + runtime
+│   ├── .dockerignore
+│   ├── pyproject.toml                # Python deps + hatchling build config
 │   └── app/
 │       ├── agents/
 │       │   ├── intent_router.py      # LLM structured-output classifier
@@ -24,12 +30,12 @@ ecomm-ops-brain/
 │       │   ├── config.py             # Pydantic Settings (env vars)
 │       │   ├── llm.py                # AzureChatOpenAI + AzureOpenAIEmbeddings factories
 │       │   ├── observability.py      # Langfuse callback factory
-│       │   └── exceptions.py        # Custom exceptions + FastAPI handlers
+│       │   └── exceptions.py         # Custom exceptions + FastAPI handlers
 │       ├── db/
 │       │   ├── postgres.py           # Async engine, session factory
 │       │   ├── qdrant.py             # AsyncQdrantClient factory, ensure_collection
 │       │   ├── checkpointer.py       # AsyncPostgresSaver setup
-│       │   └── migrations/           # SQL migration files
+│       │   └── migrations/           # SQL migration files (run at startup)
 │       ├── graph/
 │       │   ├── state.py              # OpsState TypedDict, Intent, TimeRange
 │       │   ├── nodes.py              # All 13 graph node functions
@@ -53,6 +59,10 @@ ecomm-ops-brain/
 │           ├── support_tools.py
 │           └── action_tools.py       # execute_action() dispatcher
 └── frontend/
+    ├── Dockerfile                    # Multi-stage: deps + builder (pnpm) + runtime
+    ├── .dockerignore
+    ├── package.json
+    ├── pnpm-lock.yaml
     └── src/
         ├── app/
         │   └── api/                  # Next.js proxy routes

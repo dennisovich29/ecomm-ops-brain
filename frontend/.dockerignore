@@ -1,19 +1,37 @@
+# Dependencies — installed fresh in image
 node_modules/
+.pnpm-store/
+
+# Build output — generated in image
 .next/
 out/
-.pnpm-store/
+
+# Environment and secrets
 .env
 .env.local
-.DS_Store
+.env.*.local
+
+# Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Development
+# OS
+.DS_Store
+
+# Git
 .git/
 .gitignore
-README.md
+
+# Editor
 .vscode/
 .idea/
+
+# Docs
+*.md
+
+# Docker
+Dockerfile
+.dockerignore

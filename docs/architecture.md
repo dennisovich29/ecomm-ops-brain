@@ -120,8 +120,8 @@ Startup is enforced via `depends_on` health conditions. Migrations run automatic
 | Layer | Technology |
 |---|---|
 | Frontend | Next.js 15 App Router, Tailwind CSS, Zustand, SSE |
-| Backend API | FastAPI 0.115, Python 3.12 |
-| Orchestration | LangGraph 0.2, AsyncPostgresSaver checkpointer |
+| Backend API | FastAPI ≥ 0.115, Python 3.12 |
+| Orchestration | LangGraph ≥ 1.0, AsyncPostgresSaver checkpointer |
 | LLM / Embeddings | Azure OpenAI GPT-4o, text-embedding-3-small-1 (1536-dim) |
 | Agent Framework | LangChain 1.0, create_agent (v1 API) |
 | Vector Store | Qdrant v1.9.2 — cosine similarity, score_threshold=0.5 |

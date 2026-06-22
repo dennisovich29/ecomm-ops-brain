@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic'
+export const maxDuration = 300 // 5 min — allows long LLM streams
+
 const BACKEND = process.env.API_URL || 'http://localhost:8000'
 
 export async function POST(request) {
@@ -17,6 +20,7 @@ export async function POST(request) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      cache: 'no-store',
     })
   } catch (err) {
     return new Response(
@@ -35,8 +39,9 @@ export async function POST(request) {
   return new Response(res.body, {
     headers: {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       'X-Accel-Buffering': 'no',
+      'Connection': 'keep-alive',
     },
   })
 }

@@ -61,26 +61,28 @@ def _parse_sql_file(path: pathlib.Path) -> list[str]:
 
 
 async def create_tables() -> None:
+    # Order matters: 002 seeds products/campaigns before 003's FK-referencing INSERTs
     migrations = [
         pathlib.Path(__file__).parent / "migrations" / "001_initial_schema.sql",
+        pathlib.Path(__file__).parent / "migrations" / "002_seed_data.sql",
         pathlib.Path(__file__).parent / "migrations" / "003_extend_schema.sql",
+        pathlib.Path(__file__).parent / "migrations" / "004_varied_seed_data.sql",
     ]
-    async with get_engine().begin() as conn:
-        for path in migrations:
-            for stmt in _parse_sql_file(path):
-                await conn.execute(text(stmt))
+    import logging
+    _log = logging.getLogger(__name__)
+    for path in migrations:
+        if not path.exists():
+            continue
+        try:
+            async with get_engine().begin() as conn:
+                for stmt in _parse_sql_file(path):
+                    await conn.execute(text(stmt))
+        except Exception as exc:
+            _log.warning("Migration %s failed: %s", path.name, exc)
 
 
 async def seed_data() -> None:
-    seed_migrations = [
-        pathlib.Path(__file__).parent / "migrations" / "002_seed_data.sql",
-        pathlib.Path(__file__).parent / "migrations" / "004_varied_seed_data.sql",
-    ]
-    async with get_engine().begin() as conn:
-        for path in seed_migrations:
-            if path.exists():
-                for stmt in _parse_sql_file(path):
-                    await conn.execute(text(stmt))
+    pass  # All seeding is now handled in create_tables() in dependency order
 
 
 async def dispose_engine() -> None:

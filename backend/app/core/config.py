@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     azure_openai_endpoint: str
     azure_openai_deployment: str = "gpt-4o"
     azure_openai_api_version: str = "2024-10-21"
-    azure_openai_embedding_deployment: str = "text-embedding-3-small"
+    azure_openai_embedding_deployment: str = "text-embedding-3-small-1"
 
     # PostgreSQL
     postgres_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/ecomm_ops"
@@ -30,19 +30,12 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "incidents"
 
-    # Redis
-    redis_url: str = "redis://localhost:6379"
-
     # Langfuse
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
 
     # App
-    # repo_backend versions:
-    #   v1 (or "mock")     — hardcoded mock data, no DB required
-    #   v2 (or "postgres") — live PostgreSQL data
-    repo_backend: str = "v2"  # "v1" | "v2"
     api_secret_key: str = "change-me"
     frontend_url: str = "http://localhost:3000"
 

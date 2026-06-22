@@ -50,9 +50,11 @@ def edge_after_reflection(state: OpsState) -> str:
 
 
 def edge_after_synthesis(state: OpsState) -> str:
-    """After synthesis: propose actions if ACTION/HYBRID, else format response."""
-    query_type = (state.get("intent") or {}).get("query_type", "DIAGNOSTIC")
-    if query_type in ("ACTION", "HYBRID"):
+    """After synthesis: propose actions only when the user explicitly requested one."""
+    intent = state.get("intent") or {}
+    query_type = intent.get("query_type", "DIAGNOSTIC")
+    action_requested = intent.get("action_requested", False)
+    if query_type == "ACTION" or (query_type == "HYBRID" and action_requested):
         return "propose_actions"
     return "format_response"
 
@@ -62,6 +64,3 @@ def edge_after_hitl(state: OpsState) -> str:
     return "execute_actions" if state.get("approved_actions") else "format_response"
 
 
-def edge_after_execution(state: OpsState) -> str:
-    """After execution: store incident then format response."""
-    return "store_incident"

@@ -59,6 +59,7 @@ export function useChat() {
         }
       }
     } catch (err) {
+      console.error('[useChat] stream error:', err)
       const msg = err.message || 'Something went wrong. Please try again.'
       if (streamStarted) {
         updateMessage(sessionId, streamMsgId, { role: 'error', content: msg })

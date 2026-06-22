@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from langchain_core.prompts import ChatPromptTemplate
+from langchain.messages import HumanMessage, SystemMessage
 from sqlalchemy import text
 
 from app.core.llm import get_chat_llm
@@ -10,53 +10,81 @@ from app.db.postgres import get_db_session
 from app.graph.state import OpsState
 from app.models.actions import ProposedAction
 
-_SYSTEM = """You are the Action Agent for an e-commerce operations system.
+_SYSTEM_TEMPLATE = """You are the Action Agent for an e-commerce operations system.
 
 Based on the investigation findings, propose concrete, parameterized corrective actions.
 
-IMPORTANT — use ONLY these exact IDs from the live database:
-  Products:  {product_ids}
-  Campaigns: {campaign_ids}
+━━ VALID IDs — use ONLY these, never invent your own ━━
+Products (use exact string as "product_id"):
+  {product_ids}
 
-Do NOT invent product or campaign IDs. If a campaign action is needed, use only the IDs listed above.
+Campaigns (ID — Name — Current Status):
+{campaign_info}
 
-For each action:
-1. Choose one action_type from: restock_product, apply_discount, pause_campaign, resume_campaign, create_support_ticket
-2. Provide specific parameters (product_id, quantity, discount_pct, campaign_id, etc.)
-3. Write a clear justification referencing the evidence
-4. Estimate impact if known
+━━ CAMPAIGN ACTION RULES ━━
+• The "campaign_id" parameter value MUST be the bare ID only — e.g. "CAMP-001".
+  NEVER include the name, status, or any extra text in the campaign_id value.
+• Status "paused"  → the campaign is already stopped → use "resume_campaign" to reactivate it
+• Status "active"  → the campaign is running     → use "pause_campaign" to stop it
 
-Return a JSON array of action objects. Example:
+━━ SUPPORT TICKET PARAMETER KEYS ━━
+Use exactly: "issue_type" (one of: stockout, revenue_drop, campaign_underperformance,
+regional_drop, customer_complaint, other) and "description" (short problem statement).
+
+━━ ACTION RULES ━━
+1. Choose action_type from: restock_product | apply_discount | pause_campaign | resume_campaign | create_support_ticket
+2. Parameters must use ONLY bare IDs from the lists above
+3. Write a justification referencing the evidence
+4. Estimate impact if known; set "reversible" true/false
+
+Return a JSON array. Examples:
 [
-  {{
+  {
     "action_type": "restock_product",
-    "parameters": {{"product_id": "SKU-001", "quantity": 500}},
-    "justification": "SKU-001 was out of stock all of yesterday causing 1800 lost views.",
+    "parameters": {"product_id": "SKU-001", "quantity": 500},
+    "justification": "SKU-001 out of stock caused 1800 lost views yesterday.",
     "impact_estimate": "Restores ~30% of lost daily revenue",
     "reversible": true
-  }}
+  },
+  {
+    "action_type": "resume_campaign",
+    "parameters": {"campaign_id": "CAMP-001"},
+    "justification": "CAMP-001 is paused; Electronics needs traffic.",
+    "impact_estimate": "Could restore ~10% of lost traffic",
+    "reversible": true
+  },
+  {
+    "action_type": "create_support_ticket",
+    "parameters": {"issue_type": "regional_drop", "description": "North America revenue down 37.6% vs baseline."},
+    "justification": "Regional anomaly needs manual investigation.",
+    "impact_estimate": "Unknown until root cause identified",
+    "reversible": true
+  }
 ]
 
-Only propose actions that are directly supported by the evidence. Do not invent problems."""
+Only propose actions directly supported by the evidence. Do not invent problems."""
 
 
-async def _get_valid_ids() -> tuple[list[str], list[str]]:
+async def _get_valid_ids() -> tuple[list[str], str]:
     """Fetch valid product and campaign IDs from DB for grounding."""
     try:
         async with get_db_session() as db:
             p_rows = await db.execute(text("SELECT id FROM products ORDER BY id"))
             c_rows = await db.execute(text("SELECT id, name, status FROM campaigns ORDER BY id"))
             product_ids = [r[0] for r in p_rows.fetchall()]
-            campaign_ids = [f"{r[0]} ({r[1]}, {r[2]})" for r in c_rows.fetchall()]
-        return product_ids, campaign_ids
+            # Bare IDs kept separate from display context so the LLM never copies the label
+            campaign_info = "\n".join(
+                f"  {r[0]} — {r[1]} — status: {r[2]}" for r in c_rows.fetchall()
+            ) or "  (none)"
+        return product_ids, campaign_info
     except Exception:
-        return [], []
+        return [], "  (unavailable)"
 
 
 async def propose_actions(state: OpsState) -> list[dict]:
     llm = get_chat_llm()
 
-    product_ids, campaign_ids = await _get_valid_ids()
+    product_ids, campaign_info = await _get_valid_ids()
 
     findings_summary = json.dumps({
         "sales": state.get("sales_findings"),
@@ -66,23 +94,22 @@ async def propose_actions(state: OpsState) -> list[dict]:
         "root_cause": state.get("root_cause_analysis"),
     }, indent=2)[:2000]
 
-    system_prompt = _SYSTEM.format(
-        product_ids=product_ids or ["(none loaded)"],
-        campaign_ids=campaign_ids or ["(none loaded)"],
+    system_content = (
+        _SYSTEM_TEMPLATE
+        .replace("{product_ids}", str(product_ids or ["(none loaded)"]))
+        .replace("{campaign_info}", campaign_info)
+    )
+    human_content = (
+        f"User request: {state.get('user_query', '')}\n\n"
+        f"Findings:\n{findings_summary}"
     )
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human", "User request: {query}\n\nFindings:\n{findings}"),
+    response = await llm.ainvoke([
+        SystemMessage(content=system_content),
+        HumanMessage(content=human_content),
     ])
 
-    chain = prompt | llm
-    response = await chain.ainvoke({
-        "query": state.get("user_query", ""),
-        "findings": findings_summary,
-    })
-
-    content = response.content if hasattr(response, "content") else str(response)
+    content = response.text if hasattr(response, "text") else str(response.content)
 
     # Parse JSON array from response
     try:

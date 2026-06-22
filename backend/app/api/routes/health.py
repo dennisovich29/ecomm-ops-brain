@@ -26,14 +26,6 @@ async def ready() -> JSONResponse:
     except Exception as e:
         checks["postgres"] = f"error: {e}"
 
-    # Redis
-    try:
-        from app.db.redis import get_redis_client
-        await get_redis_client().ping()
-        checks["redis"] = "ok"
-    except Exception as e:
-        checks["redis"] = f"error: {e}"
-
     # Qdrant
     try:
         from app.db.qdrant import get_qdrant_client

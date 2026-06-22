@@ -14,6 +14,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   qdrant:
     image: qdrant/qdrant:v1.9.2
@@ -22,16 +23,7 @@ services:
       - "6334:6334"
     volumes:
       - qdrantdata:/qdrant/storage
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+    restart: unless-stopped
 
   backend:
     build:
@@ -41,22 +33,21 @@ services:
       - "8000:8000"
     env_file: .env
     environment:
-      - PYTHONUNBUFFERED=1
       - POSTGRES_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/ecomm_ops
       - QDRANT_URL=http://qdrant:6333
-      - REDIS_URL=redis://redis:6379
       - API_SECRET_KEY=change-me
-      - LANGCHAIN_TRACING_V2=false
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
       qdrant:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
-    volumes:
-      - ./backend:/app
 
   frontend:
     build:
@@ -66,10 +57,10 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_WS_URL=ws://localhost:8000
       - API_URL=http://backend:8000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

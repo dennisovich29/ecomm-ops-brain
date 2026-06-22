@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
+from app.agents.middleware import support_middleware
 from app.core.llm import get_chat_llm
 from app.tools.support_tools import SUPPORT_TOOLS
 
@@ -23,8 +24,9 @@ Summarize findings as structured JSON with keys:
 
 def get_support_agent():
     llm = get_chat_llm()
-    return create_react_agent(
+    return create_agent(
         model=llm,
         tools=SUPPORT_TOOLS,
-        prompt=_SYSTEM,
+        system_prompt=_SYSTEM,
+        middleware=support_middleware(llm),
     )

@@ -15,6 +15,7 @@ class Intent(TypedDict):
     domains: list[str]       # subsets of [sales, inventory, marketing, support]
     time_range: TimeRange
     entities: list[str]      # product names, campaign IDs, etc.
+    action_requested: bool   # True only when the user explicitly asked for an action
 
 
 class OpsState(TypedDict):

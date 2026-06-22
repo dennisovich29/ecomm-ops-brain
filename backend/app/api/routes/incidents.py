@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.api.deps import verify_token
+from app.core.exceptions import IncidentQueryError
 
 router = APIRouter()
 
@@ -35,4 +36,4 @@ async def get_incident(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise IncidentQueryError(str(e))

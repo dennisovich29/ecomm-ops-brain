@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.db.postgres import create_tables, dispose_engine, seed_data
 from app.db.qdrant import close_qdrant, ensure_collection
-from app.db.redis import close_redis
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +25,11 @@ async def lifespan(app: FastAPI):
         logger.info("Langfuse tracing enabled (host=%s)", s.langfuse_host)
 
     # Postgres tables + seed data
-    if s.repo_backend != "mock":
+    try:
         await create_tables()
         await seed_data()
-    else:
-        try:
-            await create_tables()
-            await seed_data()
-        except Exception as exc:
-            logger.warning("Postgres unavailable, skipping table creation: %s", exc)
+    except Exception as exc:
+        logger.warning("Postgres unavailable, skipping table creation: %s", exc)
 
     # LangGraph checkpointer — falls back to in-memory if Postgres is down
     from app.graph.workflow import init_compiled_graph
@@ -55,16 +50,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    if s.langfuse_public_key:
-        try:
-            from langfuse import get_client
-            get_client().flush()
-        except Exception as exc:
-            logger.warning("Langfuse flush failed: %s", exc)
-
     await dispose_engine()
     await close_qdrant()
-    await close_redis()
     try:
         from app.db.checkpointer import close_checkpointer
         await close_checkpointer()
@@ -91,7 +78,9 @@ def create_app() -> FastAPI:
     from app.api.routes.chat import router as chat_router
     from app.api.routes.actions import router as actions_router
     from app.api.routes.incidents import router as incidents_router
+    from app.core.exceptions import register_exception_handlers
 
+    register_exception_handlers(app)
     app.include_router(health_router)
     app.include_router(chat_router, prefix="/chat", tags=["chat"])
     app.include_router(actions_router, prefix="/actions", tags=["actions"])

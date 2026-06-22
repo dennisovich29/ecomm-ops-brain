@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
+from app.agents.middleware import agent_middleware
 from app.core.llm import get_chat_llm
 from app.tools.inventory_tools import INVENTORY_TOOLS
 
@@ -22,8 +23,9 @@ Summarize findings as structured JSON with keys:
 
 def get_inventory_agent():
     llm = get_chat_llm()
-    return create_react_agent(
+    return create_agent(
         model=llm,
         tools=INVENTORY_TOOLS,
-        prompt=_SYSTEM,
+        system_prompt=_SYSTEM,
+        middleware=agent_middleware(llm),
     )

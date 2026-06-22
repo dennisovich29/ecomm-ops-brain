@@ -1,13 +1,13 @@
 # ── Stage 1: Dependencies ─────────────────────────────────────────────────────
-FROM node:22-alpine AS dependencies
+FROM node:22-alpine AS deps
 
 WORKDIR /app
 
-# Copy dependency files
-COPY package.json ./
+RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
 
-# Install dependencies
-RUN npm install
+# Install deps with lockfile for reproducible builds
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 
 # ── Stage 2: Build ────────────────────────────────────────────────────────────
@@ -15,15 +15,13 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Copy dependencies from previous stage
-COPY --from=dependencies /app/node_modules ./node_modules
+RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
 
-# Copy application source
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build Next.js
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+RUN pnpm build
 
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
@@ -32,15 +30,17 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000
 
-# Create non-root user
+# Non-root user for security
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy built application
+# standalone output + static assets + public dir
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
 

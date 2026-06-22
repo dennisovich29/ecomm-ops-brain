@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 async def node_route_intent(state: OpsState) -> dict:
     intent = await route_intent(state["user_query"], state["session_id"])
+    logger.info(
+        "intent_classified session=%s type=%s domains=%s action_requested=%s",
+        state["session_id"], intent["query_type"], intent["domains"],
+        intent.get("action_requested", False),
+    )
     result: dict = {
         "intent": intent,
         "active_agents": intent["domains"],
@@ -72,6 +77,7 @@ def _parse_findings(content: str) -> dict:
 
 
 async def node_run_sales_agent(state: OpsState) -> dict:
+    logger.info("agent_start domain=sales session=%s", state["session_id"])
     agent = get_sales_agent()
     callbacks = get_callbacks(state["session_id"], "sales")
     result = await agent.ainvoke(
@@ -79,10 +85,13 @@ async def node_run_sales_agent(state: OpsState) -> dict:
         config={"callbacks": callbacks}
     )
     content = _extract_last_content(result.get("messages", []))
-    return {"sales_findings": _parse_findings(content)}
+    findings = _parse_findings(content)
+    logger.info("agent_done domain=sales session=%s parsed=%s", state["session_id"], "json" if "raw" not in findings else "text")
+    return {"sales_findings": findings}
 
 
 async def node_run_inventory_agent(state: OpsState) -> dict:
+    logger.info("agent_start domain=inventory session=%s", state["session_id"])
     agent = get_inventory_agent()
     callbacks = get_callbacks(state["session_id"], "inventory")
     result = await agent.ainvoke(
@@ -90,10 +99,13 @@ async def node_run_inventory_agent(state: OpsState) -> dict:
         config={"callbacks": callbacks}
     )
     content = _extract_last_content(result.get("messages", []))
-    return {"inventory_findings": _parse_findings(content)}
+    findings = _parse_findings(content)
+    logger.info("agent_done domain=inventory session=%s parsed=%s", state["session_id"], "json" if "raw" not in findings else "text")
+    return {"inventory_findings": findings}
 
 
 async def node_run_marketing_agent(state: OpsState) -> dict:
+    logger.info("agent_start domain=marketing session=%s", state["session_id"])
     agent = get_marketing_agent()
     callbacks = get_callbacks(state["session_id"], "marketing")
     result = await agent.ainvoke(
@@ -101,10 +113,13 @@ async def node_run_marketing_agent(state: OpsState) -> dict:
         config={"callbacks": callbacks}
     )
     content = _extract_last_content(result.get("messages", []))
-    return {"marketing_findings": _parse_findings(content)}
+    findings = _parse_findings(content)
+    logger.info("agent_done domain=marketing session=%s parsed=%s", state["session_id"], "json" if "raw" not in findings else "text")
+    return {"marketing_findings": findings}
 
 
 async def node_run_support_agent(state: OpsState) -> dict:
+    logger.info("agent_start domain=support session=%s", state["session_id"])
     agent = get_support_agent()
     callbacks = get_callbacks(state["session_id"], "support")
     result = await agent.ainvoke(
@@ -112,13 +127,23 @@ async def node_run_support_agent(state: OpsState) -> dict:
         config={"callbacks": callbacks}
     )
     content = _extract_last_content(result.get("messages", []))
-    return {"support_findings": _parse_findings(content)}
+    findings = _parse_findings(content)
+    logger.info("agent_done domain=support session=%s parsed=%s", state["session_id"], "json" if "raw" not in findings else "text")
+    return {"support_findings": findings}
 
 
 # ── Reflection ──────────────────────────────────────────────────────────────
 
 async def node_run_reflection(state: OpsState) -> dict:
-    return reflect(state)
+    result = reflect(state)
+    logger.info(
+        "reflection session=%s pass=%d confidence=%.2f gaps=%s",
+        state["session_id"], result["reflection_passes"],
+        result["confidence_score"], result["gaps_identified"],
+    )
+    if result["gaps_identified"]:
+        logger.warning("reflection_gaps session=%s gaps=%s", state["session_id"], result["gaps_identified"])
+    return result
 
 
 # ── Memory Retrieval ────────────────────────────────────────────────────────
@@ -129,8 +154,14 @@ async def node_retrieve_memory(state: OpsState) -> dict:
         from app.memory.episodic import retrieve_similar_incidents
         query_text = _build_incident_text(state)
         similar = await retrieve_similar_incidents(query_text, top_k=3)
+        if similar:
+            scores = [i.get("similarity_score") for i in similar]
+            logger.info("memory_retrieved session=%s count=%d scores=%s", state["session_id"], len(similar), scores)
+        else:
+            logger.info("memory_retrieved session=%s count=0", state["session_id"])
         return {"similar_incidents": similar}
-    except Exception:
+    except Exception as e:
+        logger.error("memory_retrieve_failed session=%s error=%s", state["session_id"], e, exc_info=True)
         return {"similar_incidents": []}
 
 
@@ -150,6 +181,8 @@ def _build_incident_text(state: OpsState) -> str:
 # ── Synthesis ───────────────────────────────────────────────────────────────
 
 async def node_synthesize_findings(state: OpsState) -> dict:
+    domains = (state.get("intent") or {}).get("domains", [])
+    logger.info("synthesis_start session=%s domains=%s memory_hits=%d", state["session_id"], domains, len(state.get("similar_incidents") or []))
     llm = get_chat_llm()
     callbacks = get_callbacks(state["session_id"], "synthesis")
 
@@ -164,9 +197,29 @@ async def node_synthesize_findings(state: OpsState) -> dict:
     if state.get("similar_incidents"):
         memory_context = f"\n\nPast similar incidents:\n{json.dumps(state['similar_incidents'], indent=2)[:800]}"
 
-    prior_context = ""
-    if state.get("prior_context"):
-        prior_context = f"\n\nPrior conversation context:\n{state['prior_context']}"
+    # Build conversation history from accumulated LangGraph messages (last 3 turns = 6 messages).
+    # Exclude the current HumanMessage (last item) — it's already in "User question" below.
+    conv_history = ""
+    all_msgs = state.get("messages", [])
+    prior_msgs = all_msgs[:-1][-6:] if len(all_msgs) > 1 else []
+    if prior_msgs:
+        lines = []
+        for m in prior_msgs:
+            role = "User" if m.__class__.__name__ == "HumanMessage" else "Assistant"
+            content = m.content if isinstance(m.content, str) else str(m.content)
+            lines.append(f"{role}: {content[:500]}")
+        conv_history = "\n\nConversation history:\n" + "\n".join(lines)
+
+    has_findings = any(state.get(k) for k in ("sales_findings", "inventory_findings", "marketing_findings", "support_findings"))
+
+    if has_findings:
+        data_instruction = "Be factual. Only reference data that appears in the agent findings above. Do not pad or repeat yourself."
+    else:
+        data_instruction = (
+            "No new agent data was gathered for this turn. "
+            "Answer using the conversation history above if it is relevant, "
+            "or explain what you can help with if the question is out of scope."
+        )
 
     prompt = f"""You are answering an e-commerce operations question based on data gathered by specialist agents.
 
@@ -175,19 +228,19 @@ User question: {state['user_query']}
 Agent findings:
 {findings_summary}
 {memory_context}
-{prior_context}
+{conv_history}
 
 Rules for your response:
-1. **Answer the question directly in the first line.** 
-   - If it's a yes/no question (e.g. "are there issues?", "is X underperforming?") → start with **Yes** or **No**, then one sentence summary.
+1. **Answer the question directly in the first line.**
+   - If it's a yes/no question → start with **Yes** or **No**, then one sentence summary.
    - If it's a "what/why/how" question → give a direct 1-sentence answer first.
    - If it's a status/overview question → give a 1-line headline first.
-2. Then provide **Supporting Data** — bullet points with specific numbers, product names, dates from the findings. No vague statements.
+2. Then provide **Supporting Data** — bullet points with specific numbers, product names, dates. No vague statements.
 3. Then provide a short **Explanation** of why this is happening, if relevant.
 
 Do NOT use generic RCA headers like "Root Cause", "Contributing Factors", "Impact Summary".
 Use plain section headers that match the question (e.g. "Underperforming Campaigns", "What's Driving This", "What This Means").
-Be factual. Only reference data that appears in the findings above. Do not pad or repeat yourself.
+{data_instruction}
 Do NOT include a confidence score or confidence line in your response — it is shown separately in the UI."""
 
     response = await llm.ainvoke(prompt, config={"callbacks": callbacks})
@@ -197,6 +250,7 @@ Do NOT include a confidence score or confidence line in your response — it is 
     import re
     rca = re.sub(r'\n?\*{0,2}Confidence[:\s–—]*[\d\.]+%.*', '', rca, flags=re.IGNORECASE).strip()
 
+    logger.info("synthesis_done session=%s rca_chars=%d", state["session_id"], len(rca))
     return {
         "root_cause_analysis": rca,
         "messages": [AIMessage(content=rca)],
@@ -208,6 +262,7 @@ Do NOT include a confidence score or confidence line in your response — it is 
 async def node_propose_actions(state: OpsState) -> dict:
     from app.agents.action_agent import propose_actions
     actions = await propose_actions(state)
+    logger.info("actions_proposed session=%s count=%d types=%s", state["session_id"], len(actions), [a.get("action_type") for a in actions])
     return {"proposed_actions": actions}
 
 
@@ -226,11 +281,14 @@ async def node_hitl_checkpoint(state: OpsState) -> dict:
     """
     proposed = state.get("proposed_actions", [])
     if not proposed:
+        logger.info("hitl_skip session=%s no_proposed_actions", state["session_id"])
         return {"approved_actions": []}
 
+    logger.info("hitl_interrupt session=%s proposed=%d", state["session_id"], len(proposed))
     decision = interrupt({"proposed_actions": proposed})
     approved_ids = set(decision.get("approved_action_ids", []))
     approved = [a for a in proposed if a.get("action_id") in approved_ids]
+    logger.info("hitl_resume session=%s approved=%d declined=%d", state["session_id"], len(approved), len(proposed) - len(approved))
     return {"approved_actions": approved}
 
 
@@ -241,6 +299,10 @@ async def node_execute_actions(state: OpsState) -> dict:
     results = []
     for action in state.get("approved_actions", []):
         result = await execute_action(action)
+        status = "ok" if result.get("success") else "failed"
+        logger.info("action_executed session=%s type=%s status=%s", state["session_id"], action.get("action_type"), status)
+        if not result.get("success"):
+            logger.warning("action_failed session=%s type=%s error=%s", state["session_id"], action.get("action_type"), result.get("error"))
         results.append(result)
     return {"executed_actions": results}
 
@@ -251,8 +313,10 @@ async def node_store_incident(state: OpsState) -> dict:
     try:
         from app.memory.episodic import store_incident
         incident_id = await store_incident(state)
+        logger.info("incident_stored session=%s incident_id=%s", state["session_id"], incident_id)
         return {"current_incident_id": incident_id}
-    except Exception:
+    except Exception as e:
+        logger.error("store_incident_failed session=%s error=%s", state["session_id"], e, exc_info=True)
         return {}
 
 
@@ -260,6 +324,7 @@ async def node_store_incident(state: OpsState) -> dict:
 
 async def node_format_response(state: OpsState) -> dict:
     query_type = (state.get("intent") or {}).get("query_type", "DIAGNOSTIC")
+    logger.info("format_response session=%s query_type=%s", state["session_id"], query_type)
 
     if query_type == "GENERAL":
         response = await _format_general_response(state)
@@ -513,7 +578,21 @@ def _format_memory_response(state: OpsState) -> dict:
     if not incidents:
         summary = "No similar past incidents found in memory."
     else:
-        summary = f"Found {len(incidents)} similar past incident(s)."
+        lines = [f"Found {len(incidents)} similar past incident(s):\n"]
+        for i, inc in enumerate(incidents, 1):
+            lines.append(f"Incident {i}:")
+            if inc.get("date"):
+                lines.append(f"  Date: {inc['date']}")
+            if inc.get("query"):
+                lines.append(f"  Query: {inc['query']}")
+            if inc.get("root_cause"):
+                lines.append(f"  Root cause: {inc['root_cause']}")
+            if inc.get("actions_taken"):
+                actions = ", ".join(str(a) for a in inc["actions_taken"])
+                lines.append(f"  Actions taken: {actions}")
+            if inc.get("domains"):
+                lines.append(f"  Domains affected: {', '.join(inc['domains'])}")
+        summary = "\n".join(lines)
     return {
         "type": "memory_recall",
         "query": state.get("user_query"),

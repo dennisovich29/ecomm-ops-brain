@@ -1,34 +1,32 @@
-# ── Stage 1: Dependencies ────────────────────────────────────────────────────
-FROM python:3.12-slim AS dependencies
+# ── Stage 1: Builder ─────────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# uv — fast Python package installer
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy dependency files
+# Create isolated venv
+RUN uv venv /venv
+
+# Install deps into the venv
 COPY pyproject.toml ./
-
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -e .
+RUN uv pip install --python /venv/bin/python --no-cache .
 
 
-# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+# ── Stage 2: Runtime ─────────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-# Copy installed dependencies from builder
-COPY --from=dependencies /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=dependencies /usr/local/bin /usr/local/bin
+# Carry over only the venv — no build tools
+COPY --from=builder /venv /venv
 
-# Copy application code
-COPY . .
+# Copy application source
+COPY app/ ./app/
 
-ENV PYTHONUNBUFFERED=1 \
+ENV PATH="/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 EXPOSE 8000

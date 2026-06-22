@@ -1,7 +1,9 @@
-// All calls go through Next.js proxy routes (/api/*) to avoid CORS issues.
+// Stream goes directly to backend to avoid Next.js proxy buffering/timeout issues.
+// Other calls use the Next.js proxy (/api/*) for CORS safety.
+const DIRECT_BACKEND = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export async function* streamChat(content, sessionId) {
-  const res = await fetch('/api/chat/stream', {
+  const res = await fetch(`${DIRECT_BACKEND}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, session_id: sessionId }),

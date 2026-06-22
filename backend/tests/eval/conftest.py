@@ -148,3 +148,63 @@ def full_bad_day_state() -> dict:
         "final_response": None,
         "messages": [],
     }
+
+
+# ── Full-graph fixture ─────────────────────────────────────────────────────
+
+@pytest.fixture
+async def compiled_graph():
+    """Initialize the LangGraph compiled graph with a real PostgresSaver checkpointer.
+
+    Used by TestFullGraph eval tests. Requires the Postgres container to be running.
+    Function-scoped so each test gets its own event loop + connection (avoids
+    asyncio.Lock bound-to-different-loop errors across pytest-asyncio per-test loops).
+    """
+    from app.core.config import get_settings
+    from app.db.checkpointer import init_checkpointer, close_checkpointer
+    from app.graph.workflow import init_compiled_graph, get_compiled_graph
+
+    from app.core.config import get_settings
+    from app.db.checkpointer import init_checkpointer, close_checkpointer
+    from app.graph.workflow import init_compiled_graph, get_compiled_graph
+
+    s = get_settings()
+    checkpointer = await init_checkpointer(s.postgres_url_plain)
+    init_compiled_graph(checkpointer)
+
+    # Seed Qdrant with one historical incident so memory-recall tests have
+    # something to retrieve (collection must exist before upserting).
+    # Reset the Qdrant client singleton first — the previous test's event loop
+    # is closed, so we must create a fresh client on the new loop.
+    try:
+        import app.db.qdrant as _qdrant_module
+        if _qdrant_module._client is not None:
+            try:
+                await _qdrant_module._client.close()
+            except Exception:
+                pass
+            _qdrant_module._client = None
+
+        from app.db.qdrant import ensure_collection
+        from app.memory.episodic import store_incident
+        await ensure_collection()
+        await store_incident({
+            "user_query": "Why did sales drop last month?",
+            "root_cause_analysis": (
+                "Stockout of SKU-001 Wireless Headphones Pro caused a 35% revenue drop. "
+                "Resolved by emergency restock of 500 units; revenue recovered within 2 days."
+            ),
+            "intent": {"domains": ["sales", "inventory"]},
+            "confidence_score": 0.9,
+            "executed_actions": [
+                {"action_type": "restock_product",
+                 "parameters": {"product_id": "SKU-001", "quantity": 500}}
+            ],
+        })
+    except Exception as exc:
+        import warnings
+        warnings.warn(f"Qdrant seeding failed (memory test may degrade): {exc}")
+
+    yield get_compiled_graph()
+
+    await close_checkpointer()

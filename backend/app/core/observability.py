@@ -25,19 +25,13 @@ def _langfuse_configured() -> bool:
 
 
 def get_callbacks(session_id: str, agent_name: str) -> list[BaseCallbackHandler]:
-    """Return a Langfuse CallbackHandler for a sub-agent node.
-
-    When called inside a langfuse.start_as_current_observation() context (set up
-    in the chat route), the handler automatically nests under the current trace
-    via Python contextvars propagation.
-    """
+    """Return a Langfuse CallbackHandler for a sub-agent node."""
     if not _langfuse_configured():
         return []
     _ensure_langfuse_env()
     try:
-        # CallbackHandler auto-configures from LANGFUSE_* env vars
         handler = CallbackHandler()
-        logger.info(f"✓ Langfuse handler created for {agent_name}")
+        logger.info("✓ Langfuse handler created for %s", agent_name)
         return [handler]
     except Exception as exc:
         logger.warning("Langfuse handler creation failed: %s", exc)
@@ -45,19 +39,13 @@ def get_callbacks(session_id: str, agent_name: str) -> list[BaseCallbackHandler]
 
 
 def get_root_handler(session_id: str, user_query: str) -> CallbackHandler | None:
-    """Create a top-level CallbackHandler for a chat turn.
-
-    Pass this in the LangGraph invoke config so the full workflow is traced as
-    one unit. Carries langfuse_session_id so all turns for a session are grouped
-    in the Langfuse UI.
-    """
+    """Create a top-level CallbackHandler for a chat turn."""
     if not _langfuse_configured():
         return None
     _ensure_langfuse_env()
     try:
-        # CallbackHandler auto-configures from LANGFUSE_* env vars
         handler = CallbackHandler()
-        logger.info(f"✓ Langfuse root handler created for session {session_id}")
+        logger.info("✓ Langfuse root handler created for session %s", session_id)
         return handler
     except Exception as exc:
         logger.warning("Langfuse root handler creation failed: %s", exc)

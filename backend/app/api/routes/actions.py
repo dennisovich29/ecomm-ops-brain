@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from langgraph.types import Command
 
 from app.api.deps import get_graph, verify_token
+from app.core.exceptions import ActionExecutionError, ApprovalResumeError
 from app.models.api import ApprovalRequest, DeclineRequest
 
 router = APIRouter()
@@ -31,7 +32,7 @@ async def approve_actions(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Execution failed: {exc}")
+        raise ActionExecutionError(str(exc))
 
 
 @router.post("/decline")
@@ -49,4 +50,4 @@ async def decline_actions(
         )
         return JSONResponse({"status": "declined", "request_id": request.request_id})
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Decline failed: {exc}")
+        raise ApprovalResumeError(str(exc))

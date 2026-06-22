@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from app.db.qdrant import get_qdrant_client
 from app.core.config import get_settings
 from app.core.llm import get_embeddings
+
+logger = logging.getLogger(__name__)
 
 
 async def _embed(text: str) -> list[float]:
@@ -25,6 +28,7 @@ async def store_incident(state: dict) -> str:
     await ensure_collection()
 
     text_repr = _build_incident_text(state)
+    logger.debug("embedding_incident incident_id=%s text_len=%d", incident_id, len(text_repr))
     vector = await _embed(text_repr)
 
     payload = {
@@ -45,11 +49,14 @@ async def store_incident(state: dict) -> str:
         points=[PointStruct(id=incident_id, vector=vector, payload=payload)],
     )
 
+    logger.info("incident_upserted incident_id=%s domains=%s", incident_id, payload["domains"])
+
     # Also persist to Postgres
     try:
         await _persist_incident_to_postgres(incident_id, state)
-    except Exception:
-        pass  # Qdrant is source of truth for semantic retrieval
+        logger.debug("incident_persisted_postgres incident_id=%s", incident_id)
+    except Exception as e:
+        logger.warning("postgres_persist_failed incident_id=%s error=%s", incident_id, e)
 
     return incident_id
 
@@ -66,18 +73,21 @@ async def retrieve_similar_incidents(query_text: str, top_k: int = 3) -> list[di
     except Exception:
         return []
 
+    logger.debug("memory_search query_len=%d top_k=%d", len(query_text), top_k)
     vector = await _embed(query_text)
     try:
         results = await client.search(
             collection_name=s.qdrant_collection,
             query_vector=vector,
             limit=top_k,
-            score_threshold=0.72,
+            score_threshold=0.5,
             with_payload=True,
         )
-    except Exception:
+    except Exception as e:
+        logger.error("qdrant_search_failed error=%s", e, exc_info=True)
         return []
 
+    logger.info("memory_search_results count=%d scores=%s", len(results), [round(r.score, 3) for r in results])
     return [
         {
             "incident_id": r.payload.get("incident_id"),

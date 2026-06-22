@@ -24,30 +24,38 @@ class IntentOutput(BaseModel):
         default_factory=list,
         description="Named entities: product names, campaign names, SKU IDs, etc."
     )
+    action_requested: bool = Field(
+        default=False,
+        description="True only when the user explicitly requests an action to be performed (restock, pause, resume, fix, create ticket, etc.). False for purely informational queries even if classified HYBRID."
+    )
 
 
 _SYSTEM = """You are an intent classifier for an e-commerce operations AI system.
-Given a user query, extract:
-1. query_type: 
-   - DIAGNOSTIC (root cause analysis of business issues — e.g. "why did revenue drop", "what's causing the spike")
-   - ACTION (execute changes — e.g. "restock X", "pause campaign", "what actions should I take", "what should I do today")
-   - MEMORY (retrieve past incidents — e.g. "what happened last time", "show me similar incidents")
-   - SUMMARY (generate a report — e.g. "summarize today", "give me an overview")
-   - HYBRID (combines ACTION + DIAGNOSTIC — e.g. "diagnose and fix", "find issues and resolve them")
-   - GENERAL (purely conversational, identity, or off-topic — e.g. greetings, "who are you", "what is RCA")
 
-When in doubt between GENERAL and an ops type, prefer the ops type.
-Only use GENERAL if the query is clearly NOT about e-commerce operations or business performance.
+Read the user's query and classify it using genuine semantic understanding — not keyword matching.
+Focus on what the user is actually trying to accomplish.
 
-2. domains: which of [sales, inventory, marketing, support] are relevant (empty list for GENERAL)
-   - "what should I do today" / "what actions to take" → all domains: [sales, inventory, marketing, support]
-   - revenue/orders/products → sales
-   - stock/stockout/restock → inventory
-   - campaigns/ads/promotions → marketing
-   - tickets/complaints/refunds → support
+1. query_type — pick the one that best reflects the user's goal:
 
-3. time_range: start/end ISO dates. "today" = {today}. "yesterday" = {yesterday}. "last week" = 7 days prior.
-4. entities: any specific product names, campaign names, SKU IDs mentioned
+   DIAGNOSTIC  — the user wants to understand a situation: root cause, why something changed, what is wrong.
+   ACTION      — the user wants a specific change executed and already knows exactly what to do. No investigation needed.
+   MEMORY      — the user wants to recall or compare against past incidents.
+   SUMMARY     — the user wants a high-level report or overview of current state.
+   GENERAL     — purely conversational or clearly unrelated to e-commerce operations.
+   HYBRID      — the query combines two or more of the above intent types in a single request.
+                 Use this whenever the user is asking for multiple distinct things at once — any combination:
+                 diagnosis + action, summary + memory, investigation + report + fix, etc.
+                 The number of combined intents does not matter; if it spans more than one, it is HYBRID.
+
+   Prefer ops types over GENERAL when there is any doubt.
+
+2. domains — which of [sales, inventory, marketing, support] are relevant to answering this query.
+   Think about what data would actually be needed. For broad or unclear queries, include all domains.
+   Missing a domain is worse than including an extra one.
+
+3. time_range — start/end ISO dates. today = {today}, yesterday = {yesterday}. Default to yesterday if unspecified.
+
+4. entities — specific product names, SKU IDs, campaign names, or other named items mentioned.
 """
 
 
@@ -67,7 +75,6 @@ async def route_intent(user_query: str, session_id: str = "default") -> Intent:
     chain = prompt | structured_llm
     result: IntentOutput = await chain.ainvoke({"query": user_query}, config={"callbacks": callbacks})
 
-    # Default time range to yesterday if not set
     if not result.time_range.get("start"):
         result.time_range = TimeRange(start=yesterday, end=yesterday)
 
@@ -76,4 +83,5 @@ async def route_intent(user_query: str, session_id: str = "default") -> Intent:
         domains=result.domains,
         time_range=result.time_range,
         entities=result.entities,
+        action_requested=result.action_requested,
     )

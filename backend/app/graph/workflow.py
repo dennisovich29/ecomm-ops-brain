@@ -23,7 +23,6 @@ from app.graph.edges import (
     edge_after_reflection,
     edge_after_synthesis,
     edge_after_hitl,
-    edge_after_execution,
 )
 
 
@@ -84,9 +83,12 @@ def build_graph() -> StateGraph:
     # ── Memory → synthesis ─────────────────────────────────────────────────
     builder.add_edge("retrieve_memory", "synthesize_findings")
 
-    # ── Synthesis → action or response ────────────────────────────────────
+    # ── Synthesis → store (always) ─────────────────────────────────────────
+    builder.add_edge("synthesize_findings", "store_incident")
+
+    # ── Store → action or response ─────────────────────────────────────────
     builder.add_conditional_edges(
-        "synthesize_findings",
+        "store_incident",
         edge_after_synthesis,
         {
             "propose_actions": "propose_actions",
@@ -107,9 +109,8 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # ── Execution → store → format ────────────────────────────────────────
-    builder.add_edge("execute_actions", "store_incident")
-    builder.add_edge("store_incident", "format_response")
+    # ── Execution → format ────────────────────────────────────────────────
+    builder.add_edge("execute_actions", "format_response")
 
     # ── Final response → END ──────────────────────────────────────────────
     builder.add_edge("format_response", END)
@@ -127,5 +128,6 @@ def init_compiled_graph(checkpointer) -> None:
 
 def get_compiled_graph():
     if _compiled_graph is None:
-        raise RuntimeError("Graph not initialized — call init_compiled_graph() at startup")
+        from app.core.exceptions import GraphNotInitializedError
+        raise GraphNotInitializedError("Graph not initialized — call init_compiled_graph() at startup")
     return _compiled_graph

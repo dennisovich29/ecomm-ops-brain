@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 from app.graph.state import OpsState
+
+logger = logging.getLogger(__name__)
 
 MAX_REFLECTION_PASSES = 3
 CONFIDENCE_THRESHOLD = 0.70
@@ -76,5 +80,14 @@ def should_re_query(state: OpsState) -> str:
         and state.get("reflection_passes", 0) < MAX_REFLECTION_PASSES
         and state.get("confidence_score", 0) < CONFIDENCE_THRESHOLD
     ):
+        logger.warning(
+            "re_query_triggered pass=%d confidence=%.2f gaps=%s",
+            state.get("reflection_passes", 0), state.get("confidence_score", 0),
+            state.get("gaps_identified"),
+        )
         return "re_query"
+    logger.info(
+        "reflection_decision=synthesize pass=%d confidence=%.2f",
+        state.get("reflection_passes", 0), state.get("confidence_score", 0),
+    )
     return "synthesize"

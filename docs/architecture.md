@@ -111,7 +111,7 @@ graph LR
     BE -->|"depends_on: started"| QD
 ```
 
-Startup is enforced via `depends_on` health conditions. Migrations run automatically from `backend/app/db/migrations/` at backend startup.
+Startup is enforced via `depends_on` health conditions. At backend startup, `Base.metadata.create_all` creates all tables (idempotent), then `seed.py` populates data if the database is empty.
 
 ---
 

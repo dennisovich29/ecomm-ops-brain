@@ -3,12 +3,6 @@ from __future__ import annotations
 from fastapi import Header, HTTPException, status
 
 from app.core.config import get_settings
-from app.repositories.factory import (
-    get_sales_repo,
-    get_inventory_repo,
-    get_marketing_repo,
-    get_support_repo,
-)
 from app.graph.workflow import get_compiled_graph
 
 

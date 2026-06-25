@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.agents.reflection_agent import should_re_query
 from app.graph.state import OpsState
 
 
@@ -45,7 +46,6 @@ def edge_after_reflection(state: OpsState) -> str:
     query_type = (state.get("intent") or {}).get("query_type", "DIAGNOSTIC")
     if query_type == "SUMMARY":
         return "format_response"
-    from app.agents.reflection_agent import should_re_query
     return should_re_query(state)
 
 

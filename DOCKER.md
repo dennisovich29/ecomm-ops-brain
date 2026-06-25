@@ -67,7 +67,7 @@ docker compose build --no-cache backend
 ### Run single service
 ```bash
 docker compose up backend
-docker compose up postgres redis qdrant
+docker compose up postgres qdrant
 ```
 
 ---
@@ -139,15 +139,3 @@ Frontend requires build-time variables:
    docker system prune -a --volumes
    ```
 
----
-
-## 🎯 Makefile Shortcuts
-
-```bash
-make build       # Build all images
-make up          # Start all services
-make dev         # Start with hot reload
-make down        # Stop all services
-make logs        # Tail all logs
-make clean       # Remove containers + volumes
-```

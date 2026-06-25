@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from langgraph.graph import StateGraph, END
 
+from app.core.exceptions import GraphNotInitializedError
 from app.graph.state import OpsState
 from app.graph.nodes import (
     node_route_intent,
@@ -128,6 +129,5 @@ def init_compiled_graph(checkpointer) -> None:
 
 def get_compiled_graph():
     if _compiled_graph is None:
-        from app.core.exceptions import GraphNotInitializedError
         raise GraphNotInitializedError("Graph not initialized — call init_compiled_graph() at startup")
     return _compiled_graph

@@ -1,15 +1,35 @@
 from __future__ import annotations
 
-import os
 import logging
+import os
 from contextlib import asynccontextmanager
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+)
+
+
+class _SuppressHealthCheck(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/health" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressHealthCheck())
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.actions import router as actions_router
+from app.api.routes.chat import router as chat_router
+from app.api.routes.health import router as health_router
+from app.api.routes.incidents import router as incidents_router
 from app.core.config import get_settings
+from app.core.exceptions import register_exception_handlers
+from app.db.checkpointer import close_checkpointer, init_checkpointer
 from app.db.postgres import create_tables, dispose_engine, seed_data
 from app.db.qdrant import close_qdrant, ensure_collection
+from app.graph.workflow import init_compiled_graph
 
 logger = logging.getLogger(__name__)
 
@@ -24,17 +44,13 @@ async def lifespan(app: FastAPI):
         os.environ["LANGFUSE_HOST"] = s.langfuse_host.strip('"')
         logger.info("Langfuse tracing enabled (host=%s)", s.langfuse_host)
 
-    # Postgres tables + seed data
     try:
         await create_tables()
         await seed_data()
     except Exception as exc:
         logger.warning("Postgres unavailable, skipping table creation: %s", exc)
 
-    # LangGraph checkpointer — falls back to in-memory if Postgres is down
-    from app.graph.workflow import init_compiled_graph
     try:
-        from app.db.checkpointer import init_checkpointer
         checkpointer = await init_checkpointer(s.postgres_url_plain)
         init_compiled_graph(checkpointer)
         logger.info("LangGraph compiled with PostgresSaver checkpointer")
@@ -53,7 +69,6 @@ async def lifespan(app: FastAPI):
     await dispose_engine()
     await close_qdrant()
     try:
-        from app.db.checkpointer import close_checkpointer
         await close_checkpointer()
     except Exception:
         pass
@@ -73,12 +88,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    from app.api.routes.health import router as health_router
-    from app.api.routes.chat import router as chat_router
-    from app.api.routes.actions import router as actions_router
-    from app.api.routes.incidents import router as incidents_router
-    from app.core.exceptions import register_exception_handlers
 
     register_exception_handlers(app)
     app.include_router(health_router)

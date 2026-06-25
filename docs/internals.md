@@ -333,9 +333,9 @@ flowchart TD
 
     LOOP --> AT{"action_type"}
 
-    AT -->|"restock_product"| RS["UPDATE products\nSET stock_quantity = stock_quantity + :qty\nWHERE id = :product_id"]
+    AT -->|"restock_product"| RS["INSERT INTO inventory\n(product_id, date, stock_level, reorder_point)\nON CONFLICT DO UPDATE\nSET stock_level = stock_level + :qty"]
 
-    AT -->|"apply_discount"| AD["UPDATE products\nSET discount_pct = :pct\nWHERE id = :product_id"]
+    AT -->|"apply_discount"| AD["INSERT INTO promotions\n(id, name, discount_pct, products, status, scheduled_at)\nON CONFLICT DO NOTHING"]
 
     AT -->|"pause_campaign"| PC["UPDATE campaigns\nSET status = 'paused'\nWHERE id = :campaign_id"]
 

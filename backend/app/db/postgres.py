@@ -1,29 +1,18 @@
 from __future__ import annotations
 
-import pathlib
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import get_settings
 
+# Import all models so Base.metadata is populated before create_all runs
+import app.db.models  # noqa: F401
+from app.db.models import Base
 
-class Base(DeclarativeBase):
-    pass
-
-
-_MIGRATION_SQL = (
-    pathlib.Path(__file__).parent / "migrations" / "001_initial_schema.sql"
-)
-
-
-def _make_engine():
-    s = get_settings()
-    return create_async_engine(s.postgres_url, echo=False, pool_pre_ping=True)
-
+_log = logging.getLogger(__name__)
 
 _engine = None
 _session_factory = None
@@ -32,7 +21,8 @@ _session_factory = None
 def get_engine():
     global _engine
     if _engine is None:
-        _engine = _make_engine()
+        s = get_settings()
+        _engine = create_async_engine(s.postgres_url, echo=False, pool_pre_ping=True)
     return _engine
 
 
@@ -45,44 +35,20 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 @asynccontextmanager
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    factory = get_session_factory()
-    async with factory() as session:
+    async with get_session_factory()() as session:
         yield session
 
 
-def _parse_sql_file(path: pathlib.Path) -> list[str]:
-    statements = []
-    for raw in path.read_text().split(";"):
-        lines = [l for l in raw.splitlines() if not l.strip().startswith("--")]
-        stmt = "\n".join(lines).strip()
-        if stmt:
-            statements.append(stmt)
-    return statements
-
-
 async def create_tables() -> None:
-    # Order matters: 002 seeds products/campaigns before 003's FK-referencing INSERTs
-    migrations = [
-        pathlib.Path(__file__).parent / "migrations" / "001_initial_schema.sql",
-        pathlib.Path(__file__).parent / "migrations" / "002_seed_data.sql",
-        pathlib.Path(__file__).parent / "migrations" / "003_extend_schema.sql",
-        pathlib.Path(__file__).parent / "migrations" / "004_varied_seed_data.sql",
-    ]
-    import logging
-    _log = logging.getLogger(__name__)
-    for path in migrations:
-        if not path.exists():
-            continue
-        try:
-            async with get_engine().begin() as conn:
-                for stmt in _parse_sql_file(path):
-                    await conn.execute(text(stmt))
-        except Exception as exc:
-            _log.warning("Migration %s failed: %s", path.name, exc)
+    """Create all tables via ORM metadata (idempotent — CREATE TABLE IF NOT EXISTS)."""
+    async with get_engine().begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    _log.info("Database tables ready.")
 
 
 async def seed_data() -> None:
-    pass  # All seeding is now handled in create_tables() in dependency order
+    from app.db.seed import seed_data as _seed
+    await _seed()
 
 
 async def dispose_engine() -> None:

@@ -5,9 +5,13 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from app.db.qdrant import get_qdrant_client
+from qdrant_client.models import PointStruct
+from sqlalchemy import text
+
 from app.core.config import get_settings
 from app.core.llm import get_embeddings
+from app.db.postgres import get_db_session
+from app.db.qdrant import ensure_collection, get_qdrant_client
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +27,6 @@ async def store_incident(state: dict) -> str:
     s = get_settings()
     client = get_qdrant_client()
 
-    # Ensure collection exists before upserting
-    from app.db.qdrant import ensure_collection
     await ensure_collection()
 
     text_repr = _build_incident_text(state)
@@ -43,7 +45,6 @@ async def store_incident(state: dict) -> str:
         ],
     }
 
-    from qdrant_client.models import PointStruct
     await client.upsert(
         collection_name=s.qdrant_collection,
         points=[PointStruct(id=incident_id, vector=vector, payload=payload)],
@@ -68,7 +69,6 @@ async def retrieve_similar_incidents(query_text: str, top_k: int = 3) -> list[di
 
     # Ensure collection exists — return empty list gracefully if Qdrant is unavailable
     try:
-        from app.db.qdrant import ensure_collection
         await ensure_collection()
     except Exception:
         return []
@@ -115,8 +115,6 @@ def _build_incident_text(state: dict) -> str:
 
 
 async def _persist_incident_to_postgres(incident_id: str, state: dict) -> None:
-    from app.db.postgres import get_db_session
-    from sqlalchemy import text
 
     async with get_db_session() as session:
         await session.execute(

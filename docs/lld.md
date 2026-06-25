@@ -32,10 +32,15 @@ ecomm-ops-brain/
 │       │   ├── observability.py      # Langfuse callback factory
 │       │   └── exceptions.py         # Custom exceptions + FastAPI handlers
 │       ├── db/
-│       │   ├── postgres.py           # Async engine, session factory
+│       │   ├── postgres.py           # Async engine, session factory, create_tables, seed_data
 │       │   ├── qdrant.py             # AsyncQdrantClient factory, ensure_collection
 │       │   ├── checkpointer.py       # AsyncPostgresSaver setup
-│       │   └── migrations/           # SQL migration files (run at startup)
+│       │   ├── seed.py               # Idempotent seed data (skips if products table non-empty)
+│       │   └── models/               # SQLAlchemy ORM models (schema creation via create_all)
+│       │       ├── base.py           # DeclarativeBase
+│       │       ├── ops_data.py       # 11 operational table models
+│       │       ├── incidents.py      # Incident + IncidentAction models
+│       │       └── __init__.py
 │       ├── graph/
 │       │   ├── state.py              # OpsState TypedDict, Intent, TimeRange
 │       │   ├── nodes.py              # All 13 graph node functions
@@ -51,7 +56,10 @@ ecomm-ops-brain/
 │       ├── repositories/
 │       │   ├── interfaces.py         # Protocol interfaces for all 4 domains
 │       │   ├── factory.py            # get_*_repo() factory functions
-│       │   └── postgres/             # PostgresImpl for each domain
+│       │   ├── sales.py              # PostgresSalesRepository
+│       │   ├── inventory.py          # PostgresInventoryRepository
+│       │   ├── marketing.py          # PostgresMarketingRepository
+│       │   └── support.py            # PostgresSupportRepository
 │       └── tools/
 │           ├── sales_tools.py        # LangChain tools wrapping ISalesRepository
 │           ├── inventory_tools.py

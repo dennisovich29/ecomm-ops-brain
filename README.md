@@ -170,9 +170,9 @@ ecomm-ops-brain/
 │   │   ├── graph/           # state.py (OpsState), nodes.py, edges.py, workflow.py
 │   │   ├── tools/           # LangChain tools per domain + action_tools.py
 │   │   ├── memory/          # episodic.py (Qdrant store/retrieve)
-│   │   ├── repositories/    # interfaces + postgres/ implementations
+│   │   ├── repositories/    # interfaces + flat implementations (sales, inventory, marketing, support)
 │   │   ├── api/routes/      # chat, actions, incidents, health
-│   │   ├── db/              # postgres.py, qdrant.py, checkpointer.py
+│   │   ├── db/              # postgres.py, qdrant.py, checkpointer.py, seed.py, models/
 │   │   └── core/            # config.py, llm.py, observability.py, exceptions.py
 │   ├── tests/
 │   │   ├── unit/            # state, graph, tools, models, observability

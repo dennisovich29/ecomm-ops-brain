@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+
+from app.db.postgres import get_db_session
+from app.db.qdrant import get_qdrant_client
 
 router = APIRouter()
 
@@ -18,8 +22,6 @@ async def ready() -> JSONResponse:
 
     # Postgres
     try:
-        from app.db.postgres import get_db_session
-        from sqlalchemy import text
         async with get_db_session() as s:
             await s.execute(text("SELECT 1"))
         checks["postgres"] = "ok"
@@ -28,7 +30,6 @@ async def ready() -> JSONResponse:
 
     # Qdrant
     try:
-        from app.db.qdrant import get_qdrant_client
         await get_qdrant_client().get_collections()
         checks["qdrant"] = "ok"
     except Exception as e:

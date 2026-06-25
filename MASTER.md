@@ -26,6 +26,7 @@
 18. [Key Design Decisions — Why X Over Y](#18-key-design-decisions--why-x-over-y)
 19. [Concepts You Should Be Able to Explain](#19-concepts-you-should-be-able-to-explain)
 20. [Alternative Frameworks — Context](#20-alternative-frameworks--context)
+21. [Documentation Map](#21-documentation-map)
 
 ---
 
@@ -48,29 +49,18 @@ The key design principle: **no action executes without human approval**. The sys
 
 ## 2. System Architecture
 
+> Mermaid diagrams for all layers are in **`README.md`** (overview) and **`docs/internals.md`** (full detail — 12 diagrams covering every node, edge, data flow, HITL cycle, and startup order).
+
+The system has five runtime layers:
+
 ```
-Browser
-  │
-  ▼
-Next.js :3000  ──(proxy)──▶  FastAPI :8000
-                                  │
-                                  ▼
-                           LangGraph Workflow
-                          ┌───────────────────────────────┐
-                          │  route_intent                 │
-                          │  ├── sales_agent              │
-                          │  ├── inventory_agent          │  ──▶ PostgreSQL :5432
-                          │  ├── marketing_agent          │         (ops data +
-                          │  └── support_agent            │          checkpoints)
-                          │  run_reflection               │
-                          │  retrieve_memory              │  ──▶ Qdrant :6333
-                          │  synthesize_findings          │         (incident vectors)
-                          │  store_incident               │
-                          │  propose_actions              │  ──▶ Azure OpenAI
-                          │  hitl_checkpoint              │         (GPT-4o +
-                          │  execute_actions              │          embeddings)
-                          │  format_response              │
-                          └───────────────────────────────┘
+Browser  →  Next.js :3000  →  FastAPI :8000  →  LangGraph (13 nodes)
+                                                      │
+                                    ┌─────────────────┼─────────────────┐
+                                    ▼                 ▼                 ▼
+                             Azure OpenAI      PostgreSQL :5432    Qdrant :6333
+                           (GPT-4o + embeds)  (ops data +         (incident
+                                               checkpoints)        vectors)
 ```
 
 **All browser traffic goes through the Next.js proxy at `/api/*`.** The browser never contacts FastAPI directly. This eliminates CORS issues — the browser only ever talks to Next.js (same origin), and Next.js forwards requests server-side to FastAPI.
@@ -447,7 +437,7 @@ Azure OpenAI uses the exact same API (same SDK, same models, same endpoints form
 Three categories:
 
 **1. Operational data** (read by agent tools)
-- `products`, `inventory`, `daily_sales`, `product_daily_sales`
+- `products`, `inventory`, `daily_sales`, `product_daily_sales`, `product_views`
 - `regional_sales`, `campaigns`, `campaign_daily_metrics`
 - `channel_daily_performance`, `promotions`, `support_tickets`
 
@@ -475,6 +465,19 @@ Why not raw asyncpg? SQLAlchemy provides:
 - Parameterized queries (prevents SQL injection automatically)
 - Connection pooling management
 - Transaction management (commit/rollback)
+
+### Schema creation — SQLAlchemy ORM
+
+Tables are defined as SQLAlchemy 2.0 ORM models in `app/db/models/`. All inherit from `Base(DeclarativeBase)`. `create_tables()` runs at startup:
+
+```python
+async with engine.begin() as conn:
+    await conn.run_sync(Base.metadata.create_all)
+```
+
+`create_all` is idempotent — it only creates tables that don't yet exist. Seed data is in `app/db/seed.py`, which checks `SELECT COUNT(*) FROM products` and skips if the table already has rows (preserving data in the named `pgdata` Docker volume across rebuilds).
+
+Note: repositories use `text()` SQL directly — they are unaffected by the ORM models. The ORM layer is purely for schema management.
 
 ### psycopg3 for checkpointer
 
@@ -747,7 +750,19 @@ result = await chain.ainvoke({"query": user_query})
 
 `IntentOutput` is a Pydantic model. `with_structured_output` uses OpenAI function calling to force the LLM to return exactly this schema.
 
+**`IntentOutput` has 5 fields:**
+
+| Field | Type | Purpose |
+|---|---|---|
+| `query_type` | str | `DIAGNOSTIC`, `ACTION`, `MEMORY`, `SUMMARY`, `HYBRID`, `GENERAL` |
+| `domains` | list[str] | Subset of `[sales, inventory, marketing, support]` |
+| `time_range` | TimeRange | `{start: ISO, end: ISO}` |
+| `entities` | list[str] | Named products, SKUs, campaigns extracted from query |
+| `action_requested` | bool | True only when user explicitly requests an action |
+
 **`action_requested` field:** Critical for correct routing. `HYBRID` queries that span multiple intent types (e.g. diagnosis + summary) should NOT trigger HITL unless the user explicitly asked for something to be done. This boolean prevents "give me a full picture" from showing the action approval card.
+
+**`entities` field:** Named entities extracted from the query — product names, SKU IDs, campaign names. Gives downstream agents awareness of which specific items the user mentioned without requiring the agents to re-parse the original query text.
 
 **Fallback:** If `time_range.start` is empty (user didn't specify a date), defaults to yesterday. This prevents agents from making ambiguous queries to the DB.
 
@@ -998,6 +1013,20 @@ Python's `Protocol` (from `typing`) enables **structural subtyping** — "duck t
 
 This matters for testing: you can create a `MockSalesRepository` that returns fixed data without touching the DB, and inject it without changing any agent code.
 
+### File layout
+
+Repository implementations are flat under `app/repositories/` — no subdirectory:
+
+```
+repositories/
+├── interfaces.py   # ISalesRepository, IInventoryRepository, IMarketingRepository, ISupportRepository
+├── factory.py      # get_sales_repo(), get_inventory_repo(), get_marketing_repo(), get_support_repo()
+├── sales.py        # PostgresSalesRepository
+├── inventory.py    # PostgresInventoryRepository
+├── marketing.py    # PostgresMarketingRepository
+└── support.py      # PostgresSupportRepository
+```
+
 ### Why mock repositories were removed
 
 The mock repos (`v1`) were in-memory Python dicts with hardcoded data. They were useful for initial development but:
@@ -1201,3 +1230,37 @@ This project sits firmly in the LangGraph column on every dimension: parallel ag
 ### LangSmith Fleet (formerly LangSmith)
 
 LangSmith, the observability platform built by the LangChain team, was renamed **LangSmith Fleet** in March 2026 to reflect fleet-level agent management capabilities. This project does **not** use LangSmith/Fleet — it uses **Langfuse** instead (see Section 17). LangSmith Fleet is a valid alternative but requires LangSmith API keys and sends trace data to LangChain's hosted platform. Langfuse is open-source and can be self-hosted.
+
+---
+
+## 21. Documentation Map
+
+All project documentation and what each file is for.
+
+| File | What it contains | Best for |
+|---|---|---|
+| `README.md` | Project overview, Mermaid architecture diagram, quick start, API endpoints, env vars, project structure | First look at the project |
+| `docs/internals.md` | 12 Mermaid diagrams covering every node, edge, state field, HITL cycle, memory layer, startup order, and observability flow | Demo walkthroughs, understanding data flow visually |
+| `docs/architecture.md` | System context diagram, component diagram, Docker Compose diagram, tech stack table | High-level structural overview |
+| `docs/sequence.md` | Sequence diagrams for all 5 query types (Diagnostic, Action, Memory, Summary, HITL resume) | Explaining request/response flow per scenario |
+| `docs/lld.md` | API contracts, DB schema, tool signatures, node-level pseudo-code, action SQL | Implementation reference |
+| `docs/hld.md` | Goals, constraints, non-functional requirements, component responsibilities | Product/design context |
+| `docs/database.md` | Full PostgreSQL schema — all tables, columns, types, constraints | DB questions |
+| `MASTER.md` (this file) | Deep explanations of every technology choice, concept, design decision, and industry context | Interview prep, cross-questions, onboarding |
+
+### `docs/internals.md` — diagram index
+
+| Section | What the diagram shows |
+|---|---|
+| 1. Request Lifecycle | Full sequence: Browser → Next.js → FastAPI → LangGraph → Azure/Qdrant/PG |
+| 2. Complete LangGraph Workflow | All 13 nodes with every conditional edge and label |
+| 3. Intent Classification | 6 query types and their downstream routing paths |
+| 4. Parallel Agent Dispatch | Fan-out to 4 agents with all tool names, fan-in to reflection |
+| 5. Reflection Confidence Gate | Scoring formula, corroboration boosts, 3-condition re-query decision |
+| 6. Memory Layer | Dual-write store and retrieve side by side with exact truncation values |
+| 7. HITL Suspend/Resume | Full sequence with approve and decline branches |
+| 8. Action Execution | All 5 action types mapped to exact SQL statements |
+| 9. OpsState Field Map | Every field grouped by the node that writes it |
+| 10. Response Types | The 5 `response_type` values and when each fires |
+| 11. Startup Order | Docker Compose `depends_on` chain + backend `lifespan()` steps |
+| 12. Langfuse Observability | Opt-in tracing flow from config to per-span capture |

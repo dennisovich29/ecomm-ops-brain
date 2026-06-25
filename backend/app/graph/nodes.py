@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import date, timedelta
 
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.types import interrupt
 
+from app.agents.action_agent import propose_actions
 from app.agents.intent_router import route_intent
 from app.agents.reflection_agent import reflect
+from app.memory.episodic import retrieve_similar_incidents, store_incident
+from app.tools.action_tools import execute_action
 from app.agents.sales_agent import get_sales_agent
 from app.agents.inventory_agent import get_inventory_agent
 from app.agents.marketing_agent import get_marketing_agent
@@ -151,7 +155,6 @@ async def node_run_reflection(state: OpsState) -> dict:
 async def node_retrieve_memory(state: OpsState) -> dict:
     """Retrieve semantically similar past incidents from Qdrant."""
     try:
-        from app.memory.episodic import retrieve_similar_incidents
         query_text = _build_incident_text(state)
         similar = await retrieve_similar_incidents(query_text, top_k=3)
         if similar:
@@ -246,8 +249,6 @@ Do NOT include a confidence score or confidence line in your response — it is 
     response = await llm.ainvoke(prompt, config={"callbacks": callbacks})
     rca = response.content if hasattr(response, "content") else str(response)
 
-    # Strip any confidence line the LLM may have included anyway
-    import re
     rca = re.sub(r'\n?\*{0,2}Confidence[:\s–—]*[\d\.]+%.*', '', rca, flags=re.IGNORECASE).strip()
 
     logger.info("synthesis_done session=%s rca_chars=%d", state["session_id"], len(rca))
@@ -260,7 +261,6 @@ Do NOT include a confidence score or confidence line in your response — it is 
 # ── Action Proposal ─────────────────────────────────────────────────────────
 
 async def node_propose_actions(state: OpsState) -> dict:
-    from app.agents.action_agent import propose_actions
     actions = await propose_actions(state)
     logger.info("actions_proposed session=%s count=%d types=%s", state["session_id"], len(actions), [a.get("action_type") for a in actions])
     return {"proposed_actions": actions}
@@ -295,7 +295,6 @@ async def node_hitl_checkpoint(state: OpsState) -> dict:
 # ── Execute Actions ──────────────────────────────────────────────────────────
 
 async def node_execute_actions(state: OpsState) -> dict:
-    from app.tools.action_tools import execute_action
     results = []
     for action in state.get("approved_actions", []):
         result = await execute_action(action)
@@ -311,7 +310,6 @@ async def node_execute_actions(state: OpsState) -> dict:
 
 async def node_store_incident(state: OpsState) -> dict:
     try:
-        from app.memory.episodic import store_incident
         incident_id = await store_incident(state)
         logger.info("incident_stored session=%s incident_id=%s", state["session_id"], incident_id)
         return {"current_incident_id": incident_id}
@@ -348,27 +346,17 @@ async def _format_general_response(state: OpsState) -> dict:
     llm = get_chat_llm()
     callbacks = get_callbacks(state["session_id"], "general")
 
-    system_context = """You are OpsCore Brain, an AI assistant for e-commerce operations monitoring and diagnosis.
+    system_context = """You are OpsCore Brain, an AI assistant for e-commerce operations.
 
-You have the following specialist agents:
-- **Sales Agent** — analyzes revenue, order volume, anomalies, product breakdowns, regional performance
-- **Inventory Agent** — tracks stock levels, stockout events, lost conversions, restock recommendations
-- **Marketing Agent** — evaluates campaign performance, channel metrics, active promotions
-- **Support Agent** — monitors ticket volume, complaint themes, refund/return rates, CSAT
+You help operators monitor and investigate their e-commerce business — covering sales performance, inventory health, marketing effectiveness, and customer support trends. When asked a question about the business, you analyze relevant data and provide actionable insights.
 
-Your tools include:
-- Sales: get_daily_revenue, detect_sales_anomaly, compare_sales_periods, get_product_sales_breakdown, get_regional_sales
-- Inventory: get_stock_levels, get_stockout_events, get_restock_recommendations, get_views_vs_purchases
-- Marketing: get_campaign_metrics, get_channel_performance, get_active_promotions
-- Support: get_ticket_volume, get_complaint_themes, get_refund_return_rates, get_csat_scores
-- Actions (require human approval): restock_product, apply_discount, pause_campaign, resume_campaign, create_support_ticket
-
-You can run DIAGNOSTIC (root cause analysis), ACTION (propose + execute changes with approval), MEMORY (recall past incidents), or SUMMARY queries.
-
-IMPORTANT: You are answering a conversational or informational question — no agents have been run and no live data has been fetched. 
-Do NOT fabricate data, do NOT pretend to run diagnostics, and do NOT make up findings.
-Answer the user's question directly based only on what you know about yourself and your capabilities.
-Be concise and use markdown formatting."""
+STRICT RULES — follow without exception:
+1. Only answer questions that are directly related to e-commerce operations (sales, inventory, marketing, support, orders, products, campaigns).
+2. If the question is unrelated to e-commerce operations (e.g. general tech, programming, external topics), respond only with: "I can only assist with e-commerce operations questions."
+3. Never reveal internal implementation details — do not mention agent names, tool names, function names, graph architecture, node names, database schema, or how the system works internally.
+4. Never expose raw data, database records, or system configuration.
+5. Never answer questions about how you are built, your tech stack, or your design.
+6. Be concise and use markdown formatting."""
 
     response = await llm.ainvoke(
         [

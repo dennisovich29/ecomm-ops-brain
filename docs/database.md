@@ -23,6 +23,11 @@ erDiagram
         date date PK
         int units_sold
         numeric revenue
+    }
+
+    product_views {
+        varchar32 product_id PK,FK
+        date date PK
         int views
     }
 
@@ -63,8 +68,6 @@ erDiagram
         date date PK
         numeric spend
         numeric revenue
-        int orders
-        numeric conversion_rate
     }
 
     promotions {
@@ -77,13 +80,10 @@ erDiagram
     }
 
     support_tickets {
-        uuid id PK
+        varchar36 id PK
         timestamptz created_at
         varchar64 category
-        text subject
-        text body
         varchar16 sentiment
-        varchar16 priority
         boolean resolved
     }
 
@@ -110,6 +110,7 @@ erDiagram
 
     products ||--o{ inventory : "stock tracked by"
     products ||--o{ product_daily_sales : "sales tracked by"
+    products ||--o{ product_views : "views tracked by"
     campaigns ||--o{ campaign_daily_metrics : "metrics tracked by"
     incidents ||--o{ incident_actions : "actions taken"
 ```
@@ -122,7 +123,9 @@ erDiagram
 
 **`daily_sales`** — Aggregate revenue metrics per day. Source of truth for `get_daily_revenue()` and anomaly detection (z-score over 30-day window).
 
-**`product_daily_sales`** — Per-product revenue, unit sales, and view counts by day. Powers `get_product_sales_breakdown()` and conversion rate analysis.
+**`product_daily_sales`** — Per-product revenue and unit sales by day. Powers `get_product_sales_breakdown()`.
+
+**`product_views`** — Daily page view counts per product. Powers `get_views_vs_purchases()` — views joined with `product_daily_sales` to compute conversion rate.
 
 **`regional_sales`** — Revenue and order count by region per day. Powers `get_regional_sales()` and regional anomaly detection.
 
@@ -136,13 +139,13 @@ erDiagram
 
 **`campaign_daily_metrics`** — Daily spend, impressions, clicks, conversions, and revenue per campaign. ROAS computed at query time as `revenue / spend`.
 
-**`channel_daily_performance`** — Aggregated by channel (paid_search, email, organic, social) per day.
+**`channel_daily_performance`** — Aggregated spend and revenue by channel (paid_search, email, organic, social) per day. ROAS and conversion rates computed at query time.
 
 **`promotions`** — Discount promotions. Action tool `apply_discount` inserts rows here. `products` is a `TEXT[]` array of product IDs the promo applies to.
 
 ### Operational — Support
 
-**`support_tickets`** — Individual support tickets. `category` (e.g. `stockout`, `shipping`, `refund`) and `sentiment` (`positive`, `neutral`, `negative`) are used to compute complaint theme counts. Complaint themes are derived by GROUP BY on `category`.
+**`support_tickets`** — Individual support tickets. `category` (e.g. `stockout`, `shipping`, `refund`) and `sentiment` (`positive`, `neutral`, `negative`) are used to compute complaint theme counts and refund rate summaries. Complaint themes derived by GROUP BY on `category`.
 
 ### System
 
@@ -228,15 +231,28 @@ classDiagram
 
 ---
 
-## Migrations
+## Schema Management
 
-Migration files live in `backend/app/db/migrations/` and run automatically at backend startup via `_parse_sql_file()`. Applied in filename order.
+### ORM Models
 
-| Migration | Contents |
+Tables are defined as SQLAlchemy 2.0 ORM models in `backend/app/db/models/`:
+
+| File | Models |
 |---|---|
-| `001_initial_schema.sql` | `incidents`, `incident_actions`, `daily_sales`, `products`, `inventory`, `campaigns`, `support_tickets` |
-| `002_seed_data.sql` | Seed data — products, inventory levels, campaigns, support tickets (idempotent, `ON CONFLICT DO NOTHING`) |
-| `003_extend_schema.sql` | `product_daily_sales`, `regional_sales`, `campaign_daily_metrics`, `channel_daily_performance`, `promotions`, `product_views` |
-| `004_varied_seed_data.sql` | 30-day varied seed data for `daily_sales`, `product_daily_sales`, `regional_sales` — realistic weekly patterns for dev/testing |
+| `ops_data.py` | `Product`, `Inventory`, `DailySales`, `ProductDailySales`, `RegionalSales`, `Campaign`, `CampaignDailyMetrics`, `ChannelDailyPerformance`, `Promotion`, `ProductViews`, `SupportTicket` |
+| `incidents.py` | `Incident`, `IncidentAction` |
 
-Seed data (mock products, inventory levels, sales history, campaigns, support tickets) is inserted in the same migrations for development use.
+All models inherit from a shared `Base(DeclarativeBase)` in `base.py`. Schema creation runs at startup:
+
+```python
+async with engine.begin() as conn:
+    await conn.run_sync(Base.metadata.create_all)
+```
+
+`create_all` is idempotent — it only creates tables that don't exist yet. Existing tables and their data are never touched.
+
+### Seed Data
+
+`backend/app/db/seed.py` seeds all 11 operational tables on startup with 30 days of realistic mock data (weekly patterns, yesterday set as a "bad day" — SKU-001/002/003 stocked out, CAMP-001 paused).
+
+The seeder is idempotent: it checks `SELECT COUNT(*) FROM products` first and skips entirely if data already exists. This means the named Docker volume (`pgdata`) preserves data across container rebuilds — the seed only runs on a fresh database.
